@@ -26,6 +26,14 @@ ha_prefix = "homeassistant"
 # Default: true
 # ha_enabled = true
 
+# SunSpec point names whose Home Assistant entities are enabled by default.
+# All other discovered sensors are created but disabled and can be enabled
+# manually in Home Assistant.
+# Note: Home Assistant only applies this when an entity is first created;
+# changing the list later does not affect already existing entities.
+# Default: ["W", "WH", "St", "WMax", "VAMax", "VArMaxInj", "VArMaxAbs"]
+# ha_enabled_sensors = ["W", "WH", "St", "PhVphA", "AphA", "TmpCab"]
+
 # Optional: TLS settings for MQTT.
 # Use ca_path if your broker uses a self-signed certificate or a private CA.
 # Provide paths to your client certificate and private key (PEM format) for mTLS.

@@ -31,6 +31,7 @@ fn test_task() -> ConnectionTask<MockInverter> {
             topic_prefix: "solar".to_string(),
             ha_prefix: "homeassistant".to_string(),
             ha_enabled: true,
+            ha_enabled_sensors: crate::config::default_ha_enabled_sensors(),
             ca_path: None,
             cert_path: None,
             key_path: None,

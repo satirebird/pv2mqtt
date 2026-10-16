@@ -81,6 +81,7 @@ impl<C: InverterConnection> ConnectionTask<C> {
             ha: HomeAssistantIntegration::new(
                 mqtt_config.topic_prefix.clone(),
                 mqtt_config.ha_prefix.clone(),
+                &mqtt_config.ha_enabled_sensors,
             ),
             ha_enabled: mqtt_config.ha_enabled,
             token,

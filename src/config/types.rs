@@ -20,6 +20,8 @@ pub struct MqttConfig {
     pub ha_prefix: String,
     #[serde(default = "default_true")]
     pub ha_enabled: bool,
+    #[serde(default = "default_ha_enabled_sensors")]
+    pub ha_enabled_sensors: Vec<String>,
     pub ca_path: Option<String>,
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
@@ -27,6 +29,14 @@ pub struct MqttConfig {
 
 fn default_true() -> bool {
     true
+}
+
+// SunSpec point names whose Home Assistant entities are enabled by default.
+pub fn default_ha_enabled_sensors() -> Vec<String> {
+    ["W", "WH", "St", "WMax", "VAMax", "VArMaxInj", "VArMaxAbs"]
+        .into_iter()
+        .map(String::from)
+        .collect()
 }
 
 impl MqttConfig {
@@ -108,6 +118,7 @@ impl std::fmt::Debug for MqttConfig {
             .field("topic_prefix", &self.topic_prefix)
             .field("ha_prefix", &self.ha_prefix)
             .field("ha_enabled", &self.ha_enabled)
+            .field("ha_enabled_sensors", &self.ha_enabled_sensors)
             .field("cert_path", &self.cert_path)
             .field("key_path", &self.key_path)
             .finish()

@@ -58,6 +58,7 @@ async fn test_tls_handshake_failure() {
         topic_prefix: "solar".to_string(),
         ha_prefix: "homeassistant".to_string(),
         ha_enabled: true,
+        ha_enabled_sensors: pv2mqtt::config::default_ha_enabled_sensors(),
         ca_path: None,
         cert_path: None,
         key_path: None,

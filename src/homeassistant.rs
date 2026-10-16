@@ -5,11 +5,13 @@ use crate::mqtt::MqttMessage;
 use bytes::BufMut;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Serializer};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub struct HomeAssistantIntegration {
     topic_prefix: String,
     ha_prefix: String,
+    enabled_sensors: HashSet<String>,
     status_buffer: bytes::BytesMut,
 }
 
@@ -20,15 +22,10 @@ pub struct SensorDefinition {
     pub device_class: Option<&'static str>,
     pub state_class: Option<&'static str>,
     pub entity_category: Option<&'static str>,
-    pub enabled_by_default: bool,
 }
 
 impl SensorDefinition {
     pub fn new(name: &'static str, label: &'static str) -> Self {
-        let enabled_by_default = matches!(
-            name,
-            "W" | "WH" | "St" | "WMax" | "VAMax" | "VArMaxInj" | "VArMaxAbs"
-        );
         let entity_category = if name.starts_with("Tmp") {
             Some("diagnostic")
         } else {
@@ -42,7 +39,6 @@ impl SensorDefinition {
             device_class: None,
             state_class: None,
             entity_category,
-            enabled_by_default,
         }
     }
 
@@ -63,11 +59,6 @@ impl SensorDefinition {
 
     pub fn entity_category(mut self, ec: &'static str) -> Self {
         self.entity_category = Some(ec);
-        self
-    }
-
-    pub fn enabled_by_default(mut self, enabled: bool) -> Self {
-        self.enabled_by_default = enabled;
         self
     }
 }
@@ -215,12 +206,17 @@ struct ModernDiscoveryPayload<'a> {
 }
 
 impl HomeAssistantIntegration {
-    pub fn new(topic_prefix: String, ha_prefix: String) -> Self {
+    pub fn new(topic_prefix: String, ha_prefix: String, enabled_sensors: &[String]) -> Self {
         Self {
             topic_prefix,
             ha_prefix,
+            enabled_sensors: enabled_sensors.iter().cloned().collect(),
             status_buffer: bytes::BytesMut::with_capacity(256),
         }
+    }
+
+    fn is_sensor_enabled(&self, name: &str) -> bool {
+        self.enabled_sensors.contains(name)
     }
 
     pub fn inverter_topic(&self, serial: &str) -> Arc<str> {
@@ -367,7 +363,7 @@ impl HomeAssistantIntegration {
                 device_class: sensor.device_class,
                 state_class: sensor.state_class,
                 label: sensor.label,
-                enabled_by_default: sensor.enabled_by_default,
+                enabled_by_default: self.is_sensor_enabled(sensor.name),
                 options,
                 component: Some("sensor"),
                 command_topic: None,
@@ -517,7 +513,7 @@ impl HomeAssistantIntegration {
                 device_class: sensor.device_class,
                 state_class: sensor.state_class,
                 label: sensor.label,
-                enabled_by_default: sensor.enabled_by_default,
+                enabled_by_default: self.is_sensor_enabled(sensor.name),
                 options: None,
                 component: Some("sensor"),
                 command_topic: None,
@@ -665,7 +661,11 @@ mod tests {
 
     #[test]
     fn test_topic_helpers() {
-        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let ha = HomeAssistantIntegration::new(
+            "solar".to_string(),
+            "homeassistant".to_string(),
+            &crate::config::default_ha_enabled_sensors(),
+        );
         let serial = "SN123";
 
         assert_eq!(&*ha.inverter_topic(serial), "solar/inverter/SN123");
@@ -682,7 +682,11 @@ mod tests {
 
     #[test]
     fn test_generate_discovery_messages_m101() {
-        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let ha = HomeAssistantIntegration::new(
+            "solar".to_string(),
+            "homeassistant".to_string(),
+            &crate::config::default_ha_enabled_sensors(),
+        );
         let msgs = ha.generate_discovery_messages(
             "SN123",
             "Manufacturer",
@@ -707,8 +711,37 @@ mod tests {
     }
 
     #[test]
+    fn test_enabled_sensors_from_config() {
+        let ha = HomeAssistantIntegration::new(
+            "solar".to_string(),
+            "homeassistant".to_string(),
+            &["Hz".to_string(), "VAMax".to_string()],
+        );
+        let msgs = ha.generate_discovery_messages(
+            "SN123",
+            "Manufacturer",
+            "Model",
+            None,
+            Some(101),
+            crate::models::ActiveControlModel::None,
+        );
+
+        let MqttMessage::Publish { payload, .. } = &msgs[0];
+        let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
+        let cmps = &body["cmps"];
+        assert_eq!(cmps["Hz"]["en"], true);
+        assert_eq!(cmps["VAMax"]["en"], true);
+        assert_eq!(cmps["W"]["en"], false);
+        assert_eq!(cmps["WMax"]["en"], false);
+    }
+
+    #[test]
     fn test_generate_discovery_messages_m103_with_controls() {
-        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let ha = HomeAssistantIntegration::new(
+            "solar".to_string(),
+            "homeassistant".to_string(),
+            &crate::config::default_ha_enabled_sensors(),
+        );
         let msgs = ha.generate_discovery_messages(
             "SN123",
             "Manufacturer",
@@ -732,7 +765,11 @@ mod tests {
 
     #[test]
     fn test_generate_discovery_messages_m704_with_controls() {
-        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let ha = HomeAssistantIntegration::new(
+            "solar".to_string(),
+            "homeassistant".to_string(),
+            &crate::config::default_ha_enabled_sensors(),
+        );
         let msgs = ha.generate_discovery_messages(
             "SN123",
             "Manufacturer",
@@ -756,7 +793,11 @@ mod tests {
 
     #[test]
     fn test_generate_discovery_messages_m701() {
-        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let ha = HomeAssistantIntegration::new(
+            "solar".to_string(),
+            "homeassistant".to_string(),
+            &crate::config::default_ha_enabled_sensors(),
+        );
         let msgs = ha.generate_discovery_messages(
             "SN123",
             "Manufacturer",
@@ -780,7 +821,11 @@ mod tests {
 
     #[test]
     fn test_modern_payload_structure_details() {
-        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let ha = HomeAssistantIntegration::new(
+            "solar".to_string(),
+            "homeassistant".to_string(),
+            &crate::config::default_ha_enabled_sensors(),
+        );
         let msgs = ha.generate_discovery_messages(
             "SN123",
             "Brand",
@@ -815,7 +860,11 @@ mod tests {
 
     #[test]
     fn test_wmaxlimpct_no_device_class() {
-        let ha = HomeAssistantIntegration::new("solar".to_string(), "homeassistant".to_string());
+        let ha = HomeAssistantIntegration::new(
+            "solar".to_string(),
+            "homeassistant".to_string(),
+            &crate::config::default_ha_enabled_sensors(),
+        );
         let msgs = ha.generate_discovery_messages(
             "SN123",
             "Brand",
