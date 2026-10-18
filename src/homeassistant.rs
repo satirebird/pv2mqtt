@@ -12,6 +12,7 @@ pub struct HomeAssistantIntegration {
     topic_prefix: String,
     ha_prefix: String,
     enabled_sensors: HashSet<String>,
+    controls_enabled: bool,
     status_buffer: bytes::BytesMut,
 }
 
@@ -211,8 +212,14 @@ impl HomeAssistantIntegration {
             topic_prefix,
             ha_prefix,
             enabled_sensors: enabled_sensors.iter().cloned().collect(),
+            controls_enabled: true,
             status_buffer: bytes::BytesMut::with_capacity(256),
         }
+    }
+
+    // Controls whether command entities (MQTT `set` topics) are announced.
+    pub fn set_controls_enabled(&mut self, enabled: bool) {
+        self.controls_enabled = enabled;
     }
 
     fn is_sensor_enabled(&self, name: &str) -> bool {
@@ -424,7 +431,7 @@ impl HomeAssistantIntegration {
         components: &mut std::collections::BTreeMap<String, ModernComponentPayload>,
     ) {
         let mut controls = Vec::new();
-        if active_control != crate::models::ActiveControlModel::None {
+        if self.controls_enabled && active_control != crate::models::ActiveControlModel::None {
             if matches!(
                 active_control,
                 crate::models::ActiveControlModel::Model123 { .. }
@@ -761,6 +768,32 @@ mod tests {
         let cmps = body["cmps"].as_object().unwrap();
         assert!(cmps.contains_key("PhVphC"));
         assert!(cmps.contains_key("Conn"));
+    }
+
+    #[test]
+    fn test_generate_discovery_messages_controls_disabled() {
+        let mut ha = HomeAssistantIntegration::new(
+            "solar".to_string(),
+            "homeassistant".to_string(),
+            &crate::config::default_ha_enabled_sensors(),
+        );
+        ha.set_controls_enabled(false);
+        let msgs = ha.generate_discovery_messages(
+            "SN123",
+            "Manufacturer",
+            "Model",
+            None,
+            Some(103),
+            crate::models::ActiveControlModel::Model123 { base_addr: 40000 },
+        );
+
+        let MqttMessage::Publish { payload, .. } = &msgs[0];
+        let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
+        let cmps = body["cmps"].as_object().unwrap();
+        assert!(cmps.contains_key("PhVphC"));
+        assert!(!cmps.contains_key("Conn"));
+        assert!(!cmps.contains_key("WMaxLimPct"));
+        assert!(!cmps.contains_key("WMaxLim_Ena"));
     }
 
     #[test]

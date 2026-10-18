@@ -4,6 +4,8 @@ pub mod commands;
 pub mod config;
 pub mod error;
 pub mod homeassistant;
+#[cfg(unix)]
+pub mod ipc;
 pub mod modbus;
 pub mod models;
 pub mod mqtt;

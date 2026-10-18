@@ -85,7 +85,8 @@ interval = 60
 # preferred_model = 101
 
 # Enable bidirectional controls (SunSpec Model 123 support).
-# This allows sending commands to the inverter via MQTT.
+# This allows sending commands to the inverter via MQTT and/or the control socket
+# (see the [control] section below).
 # See README.md for available control topics and security warnings.
 # Default: false
 # enable_controls = true
@@ -102,3 +103,17 @@ interval = 60
 #[[connections.devices]]
 #unit_id = 1
 ##interval = 60
+
+# Control interfaces (optional section)
+# Selects how devices with enable_controls = true can be controlled.
+#[control]
+# Accept commands via MQTT `set` topics and announce Home Assistant control
+# entities. Default: true
+#mqtt = false
+#
+# Local control socket (line-delimited JSON over a Unix domain socket) for
+# external applications. Disabled if not set. The directory must exist.
+#socket = "/run/pv2mqtt/control.sock"
+#
+# Permissions of the socket file (octal). Default: "0660"
+#socket_mode = "0660"

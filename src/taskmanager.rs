@@ -49,6 +49,9 @@ impl TaskManager {
         // Spawn Connection tasks
         let connection_handles = self.spawn_connection_tasks();
 
+        // Spawn the local control socket, if configured
+        let ipc_handle = self.spawn_ipc_task();
+
         // Wait for shutdown signal
         self.wait_for_signal().await?;
 
@@ -61,6 +64,10 @@ impl TaskManager {
             let _ = handle.await;
         }
         info!("All connection tasks finished");
+
+        if let Some(handle) = ipc_handle {
+            let _ = handle.await;
+        }
 
         // Drop the sender to let MQTT task know we are done
         drop(self.mqtt_tx);
@@ -76,9 +83,11 @@ impl TaskManager {
         let mqtt_config = self.config.mqtt.clone();
         let mqtt_certs = Arc::clone(&self.root_cert_store);
         let mqtt_cmd_tx = self.cmd_tx.clone();
+        let mqtt_controls = self.config.control.mqtt;
 
         tokio::spawn(async move {
-            let task = MqttTask::new(mqtt_config, mqtt_rx, mqtt_certs, mqtt_cmd_tx);
+            let task = MqttTask::new(mqtt_config, mqtt_rx, mqtt_certs, mqtt_cmd_tx)
+                .with_controls(mqtt_controls);
             match task.run().await {
                 Ok(_) => info!("MQTT task finished cleanly"),
                 Err(e) => error!("MQTT task failed: {}", e),
@@ -94,6 +103,7 @@ impl TaskManager {
             let token = self.shutdown_token.clone();
             let conn_certs = Arc::clone(&self.root_cert_store);
             let cmd_rx = self.cmd_tx.subscribe();
+            let mqtt_controls = self.config.control.mqtt;
 
             let handle: JoinHandle<()> = tokio::spawn(async move {
                 let task = ConnectionTask::<SunSpecInverter>::new(
@@ -103,7 +113,8 @@ impl TaskManager {
                     token,
                     conn_certs,
                     cmd_rx,
-                );
+                )
+                .with_mqtt_controls(mqtt_controls);
 
                 if let Err(e) = task.run().await {
                     error!("Connection task failed: {}", e);
@@ -112,6 +123,39 @@ impl TaskManager {
             connection_handles.push(handle);
         }
         connection_handles
+    }
+
+    fn spawn_ipc_task(&self) -> Option<JoinHandle<()>> {
+        let path = self.config.control.socket.clone()?;
+
+        #[cfg(unix)]
+        {
+            // Validated during config loading
+            let mode = self
+                .config
+                .control
+                .socket_mode()
+                .unwrap_or(crate::config::DEFAULT_SOCKET_MODE);
+            let task = crate::ipc::IpcTask::new(
+                path,
+                mode,
+                self.cmd_tx.clone(),
+                self.shutdown_token.clone(),
+            );
+            Some(tokio::spawn(async move {
+                if let Err(e) = task.run().await {
+                    error!("Control socket task failed: {}", e);
+                }
+            }))
+        }
+        #[cfg(not(unix))]
+        {
+            tracing::warn!(
+                "Control socket {:?} configured, but not supported on this platform",
+                path
+            );
+            None
+        }
     }
 
     async fn wait_for_signal(&self) -> Result<()> {

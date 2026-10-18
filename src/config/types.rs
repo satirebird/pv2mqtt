@@ -1,15 +1,58 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::error::Result;
+use crate::error::{Pv2MqttError, Result};
 use serde::Deserialize;
 use std::env;
 use std::fs;
+use std::path::PathBuf;
 use tracing::warn;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub mqtt: MqttConfig,
     pub connections: Vec<ConnectionConfig>,
+    #[serde(default)]
+    pub control: ControlConfig,
+}
+
+// Selects the interfaces through which inverters can be controlled. Which
+// devices are controllable at all is still decided by `enable_controls`.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ControlConfig {
+    #[serde(default = "default_true")]
+    pub mqtt: bool,
+    pub socket: Option<PathBuf>,
+    pub socket_mode: Option<String>,
+}
+
+impl Default for ControlConfig {
+    fn default() -> Self {
+        Self {
+            mqtt: true,
+            socket: None,
+            socket_mode: None,
+        }
+    }
+}
+
+pub const DEFAULT_SOCKET_MODE: u32 = 0o660;
+
+impl ControlConfig {
+    // Returns the permission bits for the control socket, parsed from an octal string.
+    pub fn socket_mode(&self) -> Result<u32> {
+        match &self.socket_mode {
+            None => Ok(DEFAULT_SOCKET_MODE),
+            Some(mode) => u32::from_str_radix(mode.trim_start_matches("0o"), 8)
+                .ok()
+                .filter(|m| *m <= 0o777)
+                .ok_or_else(|| {
+                    Pv2MqttError::Config(format!(
+                        "Invalid control socket_mode '{}', expected octal like \"0660\"",
+                        mode
+                    ))
+                }),
+        }
+    }
 }
 
 #[derive(Deserialize, Clone)]

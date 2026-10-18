@@ -11,6 +11,7 @@ pub const MAX_MODBUS_UNIT_ID: u8 = 247;
 impl Config {
     pub fn validate(&self) -> Result<()> {
         self.validate_mqtt_prefixes()?;
+        self.validate_control()?;
 
         if self.connections.is_empty() {
             return Err(Pv2MqttError::Config(
@@ -22,6 +23,27 @@ impl Config {
             conn.validate()?;
         }
 
+        Ok(())
+    }
+
+    fn validate_control(&self) -> Result<()> {
+        self.control.socket_mode()?;
+        if let Some(socket) = &self.control.socket {
+            if socket.as_os_str().is_empty() {
+                return Err(Pv2MqttError::Config(
+                    "Control socket path cannot be empty".to_string(),
+                ));
+            }
+            let parent = socket.parent().filter(|p| !p.as_os_str().is_empty());
+            if let Some(parent) = parent
+                && !parent.is_dir()
+            {
+                return Err(Pv2MqttError::Config(format!(
+                    "Directory {:?} for control socket does not exist",
+                    parent
+                )));
+            }
+        }
         Ok(())
     }
 

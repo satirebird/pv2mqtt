@@ -37,6 +37,7 @@ fn test_mqtt_url_masking() {
 #[test]
 fn test_strict_prefix_validation() {
     let mut config = Config {
+        control: ControlConfig::default(),
         mqtt: MqttConfig {
             url: "mqtt://localhost:1883".to_string(),
             client_id: "test".to_string(),
@@ -82,6 +83,7 @@ fn test_strict_prefix_validation() {
 #[test]
 fn test_invalid_tcp_address() {
     let mut config = Config {
+        control: ControlConfig::default(),
         mqtt: MqttConfig {
             url: "mqtt://localhost:1883".to_string(),
             client_id: "test".to_string(),
@@ -147,6 +149,7 @@ fn test_invalid_tcp_address() {
 #[test]
 fn test_empty_connections_or_devices() {
     let mut config = Config {
+        control: ControlConfig::default(),
         mqtt: MqttConfig {
             url: "mqtt://localhost:1883".to_string(),
             client_id: "test".to_string(),
@@ -184,6 +187,7 @@ fn test_empty_connections_or_devices() {
 #[test]
 fn test_duplicate_unit_ids() {
     let config = Config {
+        control: ControlConfig::default(),
         mqtt: MqttConfig {
             url: "mqtt://localhost:1883".to_string(),
             client_id: "test".to_string(),
@@ -227,6 +231,7 @@ fn test_duplicate_unit_ids() {
 #[test]
 fn test_invalid_unit_id_range() {
     let mut config = Config {
+        control: ControlConfig::default(),
         mqtt: MqttConfig {
             url: "mqtt://localhost:1883".to_string(),
             client_id: "test".to_string(),
@@ -267,6 +272,7 @@ fn test_invalid_unit_id_range() {
 #[test]
 fn test_invalid_interval_range() {
     let mut config = Config {
+        control: ControlConfig::default(),
         mqtt: MqttConfig {
             url: "mqtt://localhost:1883".to_string(),
             client_id: "test".to_string(),
@@ -308,6 +314,7 @@ fn test_invalid_interval_range() {
 #[test]
 fn test_invalid_baud_rate() {
     let config = Config {
+        control: ControlConfig::default(),
         mqtt: MqttConfig {
             url: "mqtt://localhost:1883".to_string(),
             client_id: "test".to_string(),
@@ -405,6 +412,57 @@ fn test_rtu_config_default_parity() {
     } else {
         panic!("Expected RTU config");
     }
+}
+
+const CONTROL_TEST_BASE: &str = r#"
+    [mqtt]
+    url = "mqtt://localhost"
+    client_id = "test"
+    topic_prefix = "pv2mqtt"
+    ha_prefix = "homeassistant"
+
+    [[connections]]
+    name = "tcp_test"
+    modbus = { type = "tcp", address = "127.0.0.1:502" }
+    devices = [{ unit_id = 1 }]
+"#;
+
+#[test]
+fn test_control_config_defaults() {
+    let config: Config = toml::from_str(CONTROL_TEST_BASE).unwrap();
+    assert!(config.control.mqtt);
+    assert!(config.control.socket.is_none());
+    assert_eq!(config.control.socket_mode().unwrap(), DEFAULT_SOCKET_MODE);
+    assert!(config.validate().is_ok());
+}
+
+#[test]
+fn test_control_config_explicit() {
+    let dir = std::env::temp_dir();
+    let content = format!(
+        "{}\n[control]\nmqtt = false\nsocket = {:?}\nsocket_mode = \"0600\"\n",
+        CONTROL_TEST_BASE,
+        dir.join("pv2mqtt.sock")
+    );
+    let config: Config = toml::from_str(&content).unwrap();
+    assert!(!config.control.mqtt);
+    assert_eq!(config.control.socket, Some(dir.join("pv2mqtt.sock")));
+    assert_eq!(config.control.socket_mode().unwrap(), 0o600);
+    assert!(config.validate().is_ok());
+}
+
+#[test]
+fn test_control_config_invalid() {
+    let mut config: Config = toml::from_str(CONTROL_TEST_BASE).unwrap();
+
+    config.control.socket_mode = Some("0999".to_string());
+    assert!(config.validate().is_err());
+    config.control.socket_mode = Some("1777".to_string());
+    assert!(config.validate().is_err());
+    config.control.socket_mode = None;
+
+    config.control.socket = Some("/nonexistent-pv2mqtt-dir/control.sock".into());
+    assert!(config.validate().is_err());
 }
 
 #[test]

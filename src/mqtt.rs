@@ -32,12 +32,13 @@ pub struct MqttTask {
     rx: mpsc::Receiver<MqttMessage>,
     root_cert_store: Arc<rustls::RootCertStore>,
     cmd_tx: tokio::sync::broadcast::Sender<ModbusCommand>,
+    controls_enabled: bool,
 }
 
 async fn run_eventloop(
     client: AsyncClient,
     mut eventloop: EventLoop,
-    cmd_tx: tokio::sync::broadcast::Sender<ModbusCommand>,
+    cmd_tx: Option<tokio::sync::broadcast::Sender<ModbusCommand>>,
     topic_prefix: String,
     shutdown_token: CancellationToken,
 ) -> Result<()> {
@@ -56,13 +57,17 @@ async fn run_eventloop(
                         match notification {
                             Event::Incoming(Incoming::ConnAck(_)) => {
                                 info!("MQTT connected");
-                                debug!("Re-subscribing to {}", subscribe_topic);
-                                if let Err(e) = client.subscribe(&subscribe_topic, QoS::AtLeastOnce).await {
-                                    error!("Failed to subscribe to {}: {}", subscribe_topic, e);
+                                if cmd_tx.is_some() {
+                                    debug!("Re-subscribing to {}", subscribe_topic);
+                                    if let Err(e) = client.subscribe(&subscribe_topic, QoS::AtLeastOnce).await {
+                                        error!("Failed to subscribe to {}: {}", subscribe_topic, e);
+                                    }
                                 }
                             }
                             Event::Incoming(Incoming::Publish(p)) => {
-                                handle_incoming_publish(&p, &cmd_tx, &topic_prefix);
+                                if let Some(cmd_tx) = &cmd_tx {
+                                    handle_incoming_publish(&p, cmd_tx, &topic_prefix);
+                                }
                             }
                             Event::Outgoing(Outgoing::Disconnect) => {
                                 debug!("MQTT disconnect sent, exiting eventloop");
@@ -145,38 +150,18 @@ fn handle_incoming_publish(
         return;
     };
 
-    let action = match parsed.register {
-        "Conn" => parse_mqtt_bool(payload).map(ControlAction::Conn),
-        "WMaxLimPct" => payload.parse::<f32>().ok().map(ControlAction::WMaxLimPct),
-        "WMaxLim_Ena" => parse_mqtt_bool(payload).map(ControlAction::WMaxLimEna),
-        _ => None,
-    };
-
-    if let Some(action) = action {
+    if let Some(action) = ControlAction::parse(parsed.register, payload) {
         info!("Broadcasting command for {}: {:?}", parsed.serial, action);
         let _ = cmd_tx.send(ModbusCommand {
             serial: parsed.serial.to_string(),
             action,
+            reply: None,
         });
     } else {
         warn!(
             "Received unknown or invalid command for {}: {}",
             parsed.register, payload
         );
-    }
-}
-
-fn parse_mqtt_bool(payload: &str) -> Option<bool> {
-    if payload.eq_ignore_ascii_case("true") || payload == "1" || payload.eq_ignore_ascii_case("on")
-    {
-        Some(true)
-    } else if payload.eq_ignore_ascii_case("false")
-        || payload == "0"
-        || payload.eq_ignore_ascii_case("off")
-    {
-        Some(false)
-    } else {
-        None
     }
 }
 
@@ -192,7 +177,14 @@ impl MqttTask {
             rx,
             root_cert_store,
             cmd_tx,
+            controls_enabled: true,
         }
+    }
+
+    // Enables or disables controlling inverters via MQTT `set` topics.
+    pub fn with_controls(mut self, enabled: bool) -> Self {
+        self.controls_enabled = enabled;
+        self
     }
 
     #[tracing::instrument(name="mqtt", skip(self), fields(client_id=self.config.client_id))]
@@ -206,7 +198,10 @@ impl MqttTask {
         );
 
         let topic_prefix = self.config.topic_prefix.clone();
-        let eventloop_cmd_tx = self.cmd_tx.clone();
+        let eventloop_cmd_tx = self.controls_enabled.then(|| self.cmd_tx.clone());
+        if !self.controls_enabled {
+            info!("Control via MQTT is disabled");
+        }
         let client_clone = client.clone();
         let shutdown_token = CancellationToken::new();
         let shutdown_token_clone = shutdown_token.clone();

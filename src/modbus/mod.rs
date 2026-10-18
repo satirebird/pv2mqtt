@@ -90,6 +90,12 @@ impl<C: InverterConnection> ConnectionTask<C> {
         }
     }
 
+    // Enables or disables announcing MQTT command entities via Home Assistant discovery.
+    pub fn with_mqtt_controls(mut self, enabled: bool) -> Self {
+        self.ha.set_controls_enabled(enabled);
+        self
+    }
+
     #[tracing::instrument(name="connection", skip(self), fields(name=self.config.name))]
     pub async fn run(self) -> Result<()> {
         info!("Starting connection task");
@@ -102,7 +108,7 @@ impl<C: InverterConnection> ConnectionTask<C> {
             ha_enabled,
             token,
             root_cert_store,
-            cmd_rx,
+            mut cmd_rx,
         } = self;
 
         let mut first_run = true;
@@ -121,6 +127,12 @@ impl<C: InverterConnection> ConnectionTask<C> {
                 let ctx = Self::establish_connection(&config, Arc::clone(&root_cert_store)).await?;
                 let ctx = Arc::new(Mutex::new(ctx));
 
+                // Discard commands queued while disconnected. Replacing (rather than
+                // keeping) the old receiver matters: broadcast values are only dropped
+                // once every receiver has seen them, and pending reply handles must be
+                // released so requesters are notified.
+                cmd_rx = cmd_rx.resubscribe();
+
                 Self::run_polling_loop(
                     &config,
                     &mqtt_tx,
@@ -129,7 +141,7 @@ impl<C: InverterConnection> ConnectionTask<C> {
                     &token,
                     ctx,
                     &mut devices,
-                    cmd_rx.resubscribe(),
+                    &mut cmd_rx,
                 )
                 .await?;
                 Ok(())
@@ -168,7 +180,7 @@ impl<C: InverterConnection> ConnectionTask<C> {
         token: &CancellationToken,
         ctx: Arc<Mutex<ModbusContext>>,
         devices: &mut [DeviceState<C>],
-        mut cmd_rx: tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
+        cmd_rx: &mut tokio::sync::broadcast::Receiver<crate::commands::ModbusCommand>,
     ) -> Result<()> {
         let mut last_activity = Instant::now();
         let keep_alive_interval = config.keep_alive_interval.unwrap_or(30);

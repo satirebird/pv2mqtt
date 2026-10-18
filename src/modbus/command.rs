@@ -30,11 +30,12 @@ impl<C: InverterConnection> ConnectionTask<C> {
                 "Received command for device {}, but controls are not enabled in config",
                 cmd.serial
             );
+            cmd.respond(Err("Controls are not enabled for this device".to_string()));
             return;
         }
 
         let unit_id = device_state.config.unit_id;
-        let action = cmd.action;
+        let action = cmd.action.clone();
 
         info!("Executing command for unit {}: {:?}", unit_id, action);
 
@@ -45,6 +46,7 @@ impl<C: InverterConnection> ConnectionTask<C> {
                     "Cannot execute command for unit {}: device not connected",
                     unit_id
                 );
+                cmd.respond(Err("Device not connected".to_string()));
                 return;
             }
         };
@@ -89,7 +91,9 @@ impl<C: InverterConnection> ConnectionTask<C> {
 
         if let Err(e) = res {
             error!("Failed to execute command for {}: {}", cmd.serial, e);
+            cmd.respond(Err(e.to_string()));
         } else {
+            cmd.respond(Ok(()));
             info!(
                 "Successfully executed command for {}. Waiting {}ms before immediate poll.",
                 cmd.serial, COMMAND_POLL_DELAY_MILLIS
