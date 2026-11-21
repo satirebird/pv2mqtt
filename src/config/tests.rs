@@ -431,6 +431,7 @@ const CONTROL_TEST_BASE: &str = r#"
 fn test_control_config_defaults() {
     let config: Config = toml::from_str(CONTROL_TEST_BASE).unwrap();
     assert!(config.control.mqtt);
+    assert!(!config.control.socket_enabled);
     assert!(config.control.socket.is_none());
     assert_eq!(config.control.socket_mode().unwrap(), DEFAULT_SOCKET_MODE);
     assert!(config.validate().is_ok());
@@ -440,15 +441,66 @@ fn test_control_config_defaults() {
 fn test_control_config_explicit() {
     let dir = std::env::temp_dir();
     let content = format!(
-        "{}\n[control]\nmqtt = false\nsocket = {:?}\nsocket_mode = \"0600\"\n",
+        "{}\n[control]\nmqtt = false\nsocket_enabled = true\nsocket = {:?}\nsocket_mode = \"0600\"\n",
         CONTROL_TEST_BASE,
         dir.join("pv2mqtt.sock")
     );
-    let config: Config = toml::from_str(&content).unwrap();
+    let mut config: Config = toml::from_str(&content).unwrap();
     assert!(!config.control.mqtt);
+    assert!(config.control.socket_enabled);
+
+    // An explicitly configured path takes precedence over the environment
+    config
+        .control
+        .resolve_socket_path_internal(|_| Some("/run/other".into()));
     assert_eq!(config.control.socket, Some(dir.join("pv2mqtt.sock")));
     assert_eq!(config.control.socket_mode().unwrap(), 0o600);
     assert!(config.validate().is_ok());
+}
+
+#[test]
+fn test_control_socket_path_from_env() {
+    let resolve = |vars: &[(&str, &str)]| {
+        let mut control = ControlConfig {
+            socket_enabled: true,
+            ..Default::default()
+        };
+        control.resolve_socket_path_internal(|key| {
+            vars.iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| std::ffi::OsString::from(v))
+        });
+        control.socket
+    };
+
+    // RUNTIME_DIRECTORY wins over XDG_RUNTIME_DIR
+    assert_eq!(
+        resolve(&[
+            ("RUNTIME_DIRECTORY", "/run/pv2mqtt"),
+            ("XDG_RUNTIME_DIR", "/run/user/1000"),
+        ]),
+        Some("/run/pv2mqtt/pv2mqtt.sock".into())
+    );
+    // Only the first of several systemd runtime directories is used
+    assert_eq!(
+        resolve(&[("RUNTIME_DIRECTORY", "/run/a:/run/b")]),
+        Some("/run/a/pv2mqtt.sock".into())
+    );
+    assert_eq!(
+        resolve(&[("XDG_RUNTIME_DIR", "/run/user/1000")]),
+        Some("/run/user/1000/pv2mqtt.sock".into())
+    );
+    // Empty or relative values are ignored
+    assert_eq!(
+        resolve(&[("RUNTIME_DIRECTORY", ""), ("XDG_RUNTIME_DIR", "relative")]),
+        None
+    );
+    assert_eq!(resolve(&[]), None);
+
+    // Nothing is resolved while the socket is disabled
+    let mut control = ControlConfig::default();
+    control.resolve_socket_path_internal(|_| Some("/run/pv2mqtt".into()));
+    assert!(control.socket.is_none());
 }
 
 #[test]
@@ -461,7 +513,14 @@ fn test_control_config_invalid() {
     assert!(config.validate().is_err());
     config.control.socket_mode = None;
 
+    // A bad path is ignored while the socket is disabled
     config.control.socket = Some("/nonexistent-pv2mqtt-dir/control.sock".into());
+    assert!(config.validate().is_ok());
+    config.control.socket_enabled = true;
+    assert!(config.validate().is_err());
+
+    // Enabled without a path that could be resolved
+    config.control.socket = None;
     assert!(config.validate().is_err());
 }
 

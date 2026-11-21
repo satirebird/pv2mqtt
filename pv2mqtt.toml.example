@@ -111,9 +111,17 @@ interval = 60
 # entities. Default: true
 #mqtt = false
 #
-# Local control socket (line-delimited JSON over a Unix domain socket) for
-# external applications. Disabled if not set. The directory must exist.
-#socket = "/run/pv2mqtt/control.sock"
+# Enable the local control socket (line-delimited JSON over a Unix domain
+# socket) for external applications. Default: false
+#socket_enabled = true
+#
+# Path of the control socket. The directory must exist.
+# If not set, the path is derived from the environment:
+#   1. $RUNTIME_DIRECTORY/pv2mqtt.sock (systemd service with RuntimeDirectory=)
+#   2. $XDG_RUNTIME_DIR/pv2mqtt.sock   (user session, e.g. /run/user/1000)
+# Startup fails if socket_enabled = true and neither variable is set.
+# The path in use is logged on startup.
+#socket = "/run/pv2mqtt/pv2mqtt.sock"
 #
 # Permissions of the socket file (octal). Default: "0660"
 #socket_mode = "0660"

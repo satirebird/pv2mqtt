@@ -3,6 +3,7 @@
 use crate::error::{Pv2MqttError, Result};
 use serde::Deserialize;
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use tracing::warn;
@@ -21,6 +22,8 @@ pub struct Config {
 pub struct ControlConfig {
     #[serde(default = "default_true")]
     pub mqtt: bool,
+    #[serde(default)]
+    pub socket_enabled: bool,
     pub socket: Option<PathBuf>,
     pub socket_mode: Option<String>,
 }
@@ -29,6 +32,7 @@ impl Default for ControlConfig {
     fn default() -> Self {
         Self {
             mqtt: true,
+            socket_enabled: false,
             socket: None,
             socket_mode: None,
         }
@@ -36,8 +40,39 @@ impl Default for ControlConfig {
 }
 
 pub const DEFAULT_SOCKET_MODE: u32 = 0o660;
+pub const DEFAULT_SOCKET_NAME: &str = "pv2mqtt.sock";
 
 impl ControlConfig {
+    // Fills in the socket path from the environment if the socket is enabled
+    // but no path is configured. Called during configuration loading.
+    pub fn resolve_socket_path(&mut self) {
+        self.resolve_socket_path_internal(|key| env::var_os(key));
+    }
+
+    // Lookup order: $RUNTIME_DIRECTORY (systemd), then $XDG_RUNTIME_DIR.
+    // Uses a closure for variable resolution to allow unit testing.
+    pub(crate) fn resolve_socket_path_internal<F>(&mut self, get_var: F)
+    where
+        F: Fn(&str) -> Option<OsString>,
+    {
+        if !self.socket_enabled || self.socket.is_some() {
+            return;
+        }
+
+        // systemd may pass several colon-separated directories
+        let runtime_dir = get_var("RUNTIME_DIRECTORY")
+            .and_then(|v| env::split_paths(&v).find(|p| p.is_absolute()));
+        let xdg_dir = || {
+            get_var("XDG_RUNTIME_DIR")
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+        };
+
+        self.socket = runtime_dir
+            .or_else(xdg_dir)
+            .map(|dir| dir.join(DEFAULT_SOCKET_NAME));
+    }
+
     // Returns the permission bits for the control socket, parsed from an octal string.
     pub fn socket_mode(&self) -> Result<u32> {
         match &self.socket_mode {

@@ -126,6 +126,10 @@ impl TaskManager {
     }
 
     fn spawn_ipc_task(&self) -> Option<JoinHandle<()>> {
+        if !self.config.control.socket_enabled {
+            return None;
+        }
+        // Resolved and validated during config loading
         let path = self.config.control.socket.clone()?;
 
         #[cfg(unix)]

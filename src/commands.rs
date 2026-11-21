@@ -67,7 +67,7 @@ impl std::fmt::Debug for CommandReply {
 
 #[derive(Debug, Clone)]
 pub struct ModbusCommand {
-    pub serial: String,
+    pub serial: Option<String>,
     pub action: ControlAction,
     pub reply: Option<CommandReply>,
 }

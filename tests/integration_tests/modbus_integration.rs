@@ -374,8 +374,9 @@ async fn test_command_execution_logic() {
 
     // Send a command (WMaxLimPct)
     let cmd = pv2mqtt::commands::ModbusCommand {
-        serial: "SN1234".to_string(),
+        serial: Some("SN1234".to_string()),
         action: pv2mqtt::commands::ControlAction::WMaxLimPct(75.5),
+        reply: None,
     };
     cmd_tx.send(cmd).unwrap();
 
@@ -396,8 +397,9 @@ async fn test_command_execution_logic() {
 
     // Send a Conn command
     let cmd = pv2mqtt::commands::ModbusCommand {
-        serial: "SN1234".to_string(),
+        serial: Some("SN1234".to_string()),
         action: pv2mqtt::commands::ControlAction::Conn(true),
+        reply: None,
     };
     cmd_tx.send(cmd).unwrap();
 
@@ -497,8 +499,9 @@ async fn test_command_ignored_when_controls_disabled() {
     }
     // Send a command
     let cmd = pv2mqtt::commands::ModbusCommand {
-        serial: "SN1234".to_string(),
+        serial: Some("SN1234".to_string()),
         action: pv2mqtt::commands::ControlAction::WMaxLimPct(75.5),
+        reply: None,
     };
     cmd_tx.send(cmd).unwrap();
 
@@ -704,8 +707,9 @@ async fn test_model_704_command_execution_logic() {
 
     // Send a command (WMaxLimPct)
     let cmd = pv2mqtt::commands::ModbusCommand {
-        serial: "SN1234".to_string(),
+        serial: Some("SN1234".to_string()),
         action: pv2mqtt::commands::ControlAction::WMaxLimPct(80.0),
+        reply: None,
     };
     cmd_tx.send(cmd).unwrap();
 

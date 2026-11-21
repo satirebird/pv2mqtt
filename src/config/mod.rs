@@ -21,6 +21,7 @@ impl Config {
         let mut config: Config = toml::from_str(&content)
             .map_err(|e| Pv2MqttError::Config(format!("Failed to parse config TOML: {}", e)))?;
         config.mqtt.inject_env_credentials()?;
+        config.control.resolve_socket_path();
         config.validate()?;
         Ok(config)
     }

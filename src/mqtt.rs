@@ -153,7 +153,7 @@ fn handle_incoming_publish(
     if let Some(action) = ControlAction::parse(parsed.register, payload) {
         info!("Broadcasting command for {}: {:?}", parsed.serial, action);
         let _ = cmd_tx.send(ModbusCommand {
-            serial: parsed.serial.to_string(),
+            serial: Some(parsed.serial.to_string()),
             action,
             reply: None,
         });
@@ -415,7 +415,7 @@ mod tests {
         };
         handle_incoming_publish(&p, &cmd_tx, prefix);
         let cmd = cmd_rx.try_recv().expect("Should have received a command");
-        assert_eq!(cmd.serial, "SN123");
+        assert_eq!(cmd.serial.unwrap(), "SN123");
         assert!(matches!(cmd.action, ControlAction::WMaxLimPct(val) if val == 75.5));
 
         // 2. Invalid prefix

@@ -8,6 +8,7 @@
 use crate::commands::{CommandReply, ControlAction, ModbusCommand};
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,7 +25,7 @@ pub const IPC_REPLY_TIMEOUT_SECS: u64 = 15;
 
 #[derive(Debug, Deserialize)]
 struct IpcRequest {
-    serial: String,
+    serial: Option<String>,
     cmd: String,
     value: serde_json::Value,
 }
@@ -49,6 +50,13 @@ impl IpcResponse {
             ok: false,
             error: Some(msg.into()),
         }
+    }
+}
+
+impl Display for IpcRequest {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let serial = self.serial.as_deref().unwrap_or("<Any>");
+        write!(f, "{} {} {}", serial, self.cmd, self.value)
     }
 }
 
@@ -100,7 +108,7 @@ impl IpcTask {
     #[tracing::instrument(name="ipc", skip(self), fields(path=?self.path))]
     pub async fn run(self) -> Result<()> {
         let listener = self.bind()?;
-        info!("Control socket listening");
+        info!("Control socket listening on {}", self.path.display());
 
         let clients = Arc::new(Semaphore::new(IPC_MAX_CLIENTS));
 
@@ -229,7 +237,7 @@ async fn process_request(line: &str, cmd_tx: &broadcast::Sender<ModbusCommand>) 
         ));
     };
 
-    info!("Control request for {}: {:?}", req.serial, action);
+    info!("Control request for {}", req);
 
     let (reply, rx) = CommandReply::new();
     let cmd = ModbusCommand {
@@ -312,7 +320,7 @@ mod tests {
         // Simulated connection task answering commands
         let responder = tokio::spawn(async move {
             let cmd = cmd_rx.recv().await.unwrap();
-            assert_eq!(cmd.serial, "SN123");
+            assert_eq!(cmd.serial.as_deref().unwrap(), "SN123");
             assert!(matches!(cmd.action, ControlAction::WMaxLimPct(v) if v == 50.0));
             cmd.respond(Ok(()));
 

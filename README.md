@@ -68,9 +68,14 @@ The optional `[control]` section selects how commands are accepted:
 ```toml
 [control]
 mqtt = false                          # disable MQTT `set` topics (default: true)
-socket = "/run/pv2mqtt/control.sock"  # enable the local control socket
+socket_enabled = true                 # enable the local control socket (default: false)
+socket = "/run/pv2mqtt/pv2mqtt.sock"  # socket path (optional, see below)
 socket_mode = "0660"                  # socket file permissions (default: 0660)
 ```
+
+If `socket` is not set, the path is taken from the environment:
+`$RUNTIME_DIRECTORY/pv2mqtt.sock` (set by systemd with `RuntimeDirectory=`),
+otherwise `$XDG_RUNTIME_DIR/pv2mqtt.sock`. The path in use is logged on startup.
 
 With `mqtt = false`, pv2mqtt does not subscribe to `set` topics and does not
 announce control entities to Home Assistant. Control state is still published.
@@ -79,7 +84,7 @@ The control socket accepts one JSON object per line and answers each request
 with one line once the Modbus write has completed:
 
 ```console
-$ echo '{"serial":"SN123","cmd":"WMaxLimPct","value":50}' | socat - UNIX-CONNECT:/run/pv2mqtt/control.sock
+$ echo '{"serial":"SN123","cmd":"WMaxLimPct","value":50}' | socat - UNIX-CONNECT:/run/pv2mqtt/pv2mqtt.sock
 {"ok":true}
 ```
 
@@ -90,7 +95,7 @@ string. Errors are reported as `{"ok":false,"error":"..."}`. Example in Python:
 import json, socket
 
 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-    s.connect("/run/pv2mqtt/control.sock")
+    s.connect("/run/pv2mqtt/pv2mqtt.sock")
     f = s.makefile("rw")
     f.write(json.dumps({"serial": "SN123", "cmd": "WMaxLimPct", "value": 50}) + "\n")
     f.flush()

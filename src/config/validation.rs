@@ -28,21 +28,29 @@ impl Config {
 
     fn validate_control(&self) -> Result<()> {
         self.control.socket_mode()?;
-        if let Some(socket) = &self.control.socket {
-            if socket.as_os_str().is_empty() {
-                return Err(Pv2MqttError::Config(
-                    "Control socket path cannot be empty".to_string(),
-                ));
-            }
-            let parent = socket.parent().filter(|p| !p.as_os_str().is_empty());
-            if let Some(parent) = parent
-                && !parent.is_dir()
-            {
-                return Err(Pv2MqttError::Config(format!(
-                    "Directory {:?} for control socket does not exist",
-                    parent
-                )));
-            }
+        if !self.control.socket_enabled {
+            return Ok(());
+        }
+        let Some(socket) = &self.control.socket else {
+            return Err(Pv2MqttError::Config(
+                "Control socket is enabled, but no socket path is configured and neither \
+                 RUNTIME_DIRECTORY nor XDG_RUNTIME_DIR is set"
+                    .to_string(),
+            ));
+        };
+        if socket.as_os_str().is_empty() {
+            return Err(Pv2MqttError::Config(
+                "Control socket path cannot be empty".to_string(),
+            ));
+        }
+        let parent = socket.parent().filter(|p| !p.as_os_str().is_empty());
+        if let Some(parent) = parent
+            && !parent.is_dir()
+        {
+            return Err(Pv2MqttError::Config(format!(
+                "Directory {:?} for control socket does not exist",
+                parent
+            )));
         }
         Ok(())
     }

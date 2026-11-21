@@ -5,37 +5,18 @@ use super::{
     M123_WMAX_LIM_ENA_OFFSET, M123_WMAX_LIM_PCT_OFFSET, M123_WMAX_LIM_PCT_SF_OFFSET,
     M704_WMAX_LIM_ENA_OFFSET, M704_WMAX_LIM_PCT_OFFSET, M704_WMAX_LIM_PCT_SF_OFFSET,
 };
-use crate::commands::ControlAction;
+use crate::commands::{CommandResult, ControlAction};
 use crate::error::{ModbusError, Pv2MqttError, Result};
 use crate::models::ActiveControlModel;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 impl<C: InverterConnection> ConnectionTask<C> {
-    pub async fn handle_command(
-        devices: &mut [DeviceState<C>],
-        cmd: crate::commands::ModbusCommand,
-    ) {
-        // Find if this command is for one of our devices
-        let device_state = match devices
-            .iter_mut()
-            .find(|d| d.serial.as_ref() == Some(&cmd.serial))
-        {
-            Some(d) => d,
-            None => return, // Not for us
-        };
-
-        if !device_state.config.enable_controls {
-            warn!(
-                "Received command for device {}, but controls are not enabled in config",
-                cmd.serial
-            );
-            cmd.respond(Err("Controls are not enabled for this device".to_string()));
-            return;
-        }
-
+    async fn execute_command(
+        device_state: &mut DeviceState<C>,
+        action: ControlAction,
+    ) -> CommandResult {
         let unit_id = device_state.config.unit_id;
-        let action = cmd.action.clone();
 
         info!("Executing command for unit {}: {:?}", unit_id, action);
 
@@ -46,8 +27,7 @@ impl<C: InverterConnection> ConnectionTask<C> {
                     "Cannot execute command for unit {}: device not connected",
                     unit_id
                 );
-                cmd.respond(Err("Device not connected".to_string()));
-                return;
+                return Err("Device not connected".to_string());
             }
         };
 
@@ -89,20 +69,60 @@ impl<C: InverterConnection> ConnectionTask<C> {
         }
         .await;
 
+        device_state.last_poll = None;
+        let serial = device_state.serial.as_deref().unwrap_or("N/A");
+
         if let Err(e) = res {
-            error!("Failed to execute command for {}: {}", cmd.serial, e);
-            cmd.respond(Err(e.to_string()));
+            error!("Failed to execute command for {}: {}", serial, e);
+            return Err(e.to_string());
         } else {
-            cmd.respond(Ok(()));
-            info!(
-                "Successfully executed command for {}. Waiting {}ms before immediate poll.",
-                cmd.serial, COMMAND_POLL_DELAY_MILLIS
-            );
+            info!("Successfully executed command for {}", serial);
         }
 
+        Ok(())
+    }
+
+    pub async fn handle_command(
+        devices: &mut [DeviceState<C>],
+        cmd: crate::commands::ModbusCommand,
+    ) {
+        for device_state in devices {
+            // Find if this command is for one of our devices
+            if cmd.serial.is_some() && (&cmd.serial != &device_state.serial) {
+                continue;
+            }
+            let dev_name = device_state
+                .serial
+                .clone()
+                .unwrap_or_else(|| device_state.config.unit_id.to_string());
+            if !device_state.config.enable_controls {
+                warn!(
+                    "Received command for device {}, but controls are not enabled in config",
+                    &dev_name
+                );
+                // check if we have to iterate over all devices
+                if cmd.serial.is_none() {
+                    continue;
+                } else {
+                    cmd.respond(Err("Controls are not enabled for this device".to_string()));
+                    return;
+                }
+            }
+
+            let res = Self::execute_command(device_state, cmd.action.clone()).await;
+            if res.is_err() {
+                // Stop on first error
+                cmd.respond(res);
+                return;
+            }
+        }
+
+        info!(
+            "Waiting {}ms before immediate poll.",
+            COMMAND_POLL_DELAY_MILLIS
+        );
         // Small delay to allow hardware to settle and update internal state
         tokio::time::sleep(Duration::from_millis(COMMAND_POLL_DELAY_MILLIS)).await;
-        device_state.last_poll = None;
     }
 
     async fn write_conn(
