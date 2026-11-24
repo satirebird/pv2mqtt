@@ -86,6 +86,7 @@ impl<C: InverterConnection> ConnectionTask<C> {
         devices: &mut [DeviceState<C>],
         cmd: crate::commands::ModbusCommand,
     ) {
+        let mut executed = false;
         for device_state in devices {
             // Find if this command is for one of our devices
             if cmd.serial.is_some() && (&cmd.serial != &device_state.serial) {
@@ -115,6 +116,13 @@ impl<C: InverterConnection> ConnectionTask<C> {
                 cmd.respond(res);
                 return;
             }
+            executed = true;
+        }
+
+        // Acknowledge success. If no device of this connection was addressed,
+        // stay silent so another connection (or the "unknown serial" path) answers.
+        if executed {
+            cmd.respond(Ok(()));
         }
 
         info!(
